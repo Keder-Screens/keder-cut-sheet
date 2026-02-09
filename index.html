@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Keder Factory Cut Sheet Calculator</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @media print {
+      /* Hide input panel and print button */
+      .no-print { display: none !important; }
+
+      /* Reset page margins */
+      @page { margin: 0.5in; }
+      body { 
+        margin: 0 !important; 
+        padding: 0 !important; 
+        background: white !important;
+      }
+      #root { margin: 0 !important; padding: 0 !important; }
+
+      /* Force single column full width */
+      .grid.lg\:grid-cols-2 {
+        display: block !important;
+      }
+      .max-w-6xl {
+        max-width: 100% !important;
+        padding: 0 !important;
+      }
+      .min-h-screen {
+        min-height: auto !important;
+        background: white !important;
+        padding: 0 !important;
+      }
+
+      /* Prevent cut-off across pages */
+      .bg-white, .bg-blue-50, .bg-gray-50, table {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+
+      /* Kill link URL printing */
+      a[href]::after { content: none !important; }
+      a { text-decoration: none !important; }
+
+      /* Clean backgrounds for print */
+      * { background-image: none !important; }
+
+      /* Print title styling */
+      .print-title {
+        display: block !important;
+        font-size: 18pt;
+        font-weight: bold;
+        margin-bottom: 8px;
+      }
+    }
+
+    @media screen {
+      .print-only { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  
+  <script type="text/babel">
+    const { useState, useMemo } = React;
+
+    function CutSheetCalculator() {
+      const [dimensions, setDimensions] = useState({
+        topWidth: 120,
+        midWidth: 120,
+        bottomWidth: 120,
+        leftHeight: 100,
+        centerHeight: 100,
+        rightHeight: 100,
+      });
+
+      const [options, setOptions] = useState({
+        installationType: 'face_mount',
+        trackMountLeft: 'wall_mount',
+        trackMountRight: 'wall_mount',
+        uChannelLeft: false,
+        uChannelRight: false,
+        applyUChannelDeductions: false,
+        applyBoxDeduction: true,
+        brushSize: '1',
+        motorType: 'alpha',
+        motorSide: 'left',
+        fabricType: 'solar_standard',
+        frameColor: 'black',
+      });
+
+      const [orderInfo, setOrderInfo] = useState({
+        orderNumber: '',
+        unitNumber: '1',
+        fabricColor: '',
+      });
+
+      const fabricRollWidths = {
+        solar_standard: { rollWidth: 126, maxPanel: 120, name: 'Standard Solar (126")' },
+        solar_extended_a: { rollWidth: 138, maxPanel: 132, name: 'Extended A (138")' },
+        solar_extended_b: { rollWidth: 144, maxPanel: 138, name: 'Extended B (144")' },
+        vinyl_70: { rollWidth: 70.9, maxPanel: 64.9, name: 'Vinyl 70.9"' },
+        vinyl_61: { rollWidth: 61, maxPanel: 55, name: 'Vinyl 61"' },
+      };
+
+      const calculateSpringHoles = (height) => {
+        const topOffset = 8;
+        const bottomOffset = 12;
+        const minSpacing = 16;
+        const maxSpacing = 20;
+
+        const A = height - (topOffset + bottomOffset);
+
+        const k_min = Math.ceil(A / maxSpacing);
+        const k_max = Math.floor(A / minSpacing);
+
+        if (k_max < k_min) {
+          return { error: 'Invalid height for spring calculation', holes: 0, spacing: 0, positions: [] };
+        }
+
+        const k = height > 144 ? k_max : k_min;
+        const spacing = A / k;
+        const holes = k + 1;
+
+        const positions = [];
+        for (let i = 0; i <= k; i++) {
+          positions.push(Number((topOffset + i * spacing).toFixed(2)));
+        }
+
+        return { holes, spacing: Number(spacing.toFixed(2)), positions };
+      };
+
+      const calculations = useMemo(() => {
+        let selectedWidth;
+        if (options.installationType === 'inside_mount') {
+          selectedWidth = Math.min(dimensions.topWidth, dimensions.midWidth, dimensions.bottomWidth);
+        } else {
+          selectedWidth = Math.max(dimensions.topWidth, dimensions.midWidth, dimensions.bottomWidth);
+        }
+
+        const selectedHeight = Math.max(dimensions.leftHeight, dimensions.centerHeight, dimensions.rightHeight);
+
+        let trackAdjustment = 0;
+        if (options.trackMountLeft === 'wall_mount') trackAdjustment += 3;
+        if (options.trackMountRight === 'wall_mount') trackAdjustment += 3;
+
+        const W_base = selectedWidth + trackAdjustment;
+
+        const boxDeduction = options.applyBoxDeduction ? 0.25 : 0;
+        const boxWidth = W_base - boxDeduction;
+
+        let u_channel_ded = 0;
+        if (options.applyUChannelDeductions) {
+          if (options.uChannelLeft) u_channel_ded += 0.375;
+          if (options.uChannelRight) u_channel_ded += 0.375;
+        }
+
+        const H_system = selectedHeight;
+
+        const springData = calculateSpringHoles(H_system);
+
+        const fabricInfo = fabricRollWidths[options.fabricType];
+        const materialCutHeight = H_system + 10;
+        const seamRequired = materialCutHeight > fabricInfo.maxPanel;
+        let panel1Height = seamRequired ? fabricInfo.maxPanel : materialCutHeight;
+        let panel2Height = seamRequired ? materialCutHeight - fabricInfo.maxPanel : 0;
+
+        const cuts = {
+          fabricWidth: W_base - 3.5 - u_channel_ded,
+          fabricHeight: H_system + 10,
+          weightBar: W_base - 6.625 - u_channel_ded,
+          rollerTube: W_base - 14.5,
+          housingMain: boxWidth - 0.5,
+          housingCover: boxWidth - 0.5625,
+          vTrackLeft: H_system,
+          vTrackRight: H_system,
+          uChannelLeft: options.uChannelLeft ? H_system : null,
+          uChannelRight: options.uChannelRight ? H_system : null,
+          sleeves: 4,
+          pileBrush: W_base - 6.625,
+          housingBrush: W_base * 2,
+        };
+
+        return {
+          selectedWidth,
+          selectedHeight,
+          trackAdjustment,
+          W_base,
+          boxWidth,
+          boxDeduction,
+          H_system,
+          u_channel_ded,
+          cuts,
+          springData,
+          seamRequired,
+          panel1Height,
+          panel2Height,
+          fabricInfo,
+        };
+      }, [dimensions, options]);
+
+      const formatFraction = (decimal) => {
+        const fractions = [
+          { val: 0.0625, str: '1/16' },
+          { val: 0.125, str: '1/8' },
+          { val: 0.1875, str: '3/16' },
+          { val: 0.25, str: '1/4' },
+          { val: 0.3125, str: '5/16' },
+          { val: 0.375, str: '3/8' },
+          { val: 0.4375, str: '7/16' },
+          { val: 0.5, str: '1/2' },
+          { val: 0.5625, str: '9/16' },
+          { val: 0.625, str: '5/8' },
+          { val: 0.6875, str: '11/16' },
+          { val: 0.75, str: '3/4' },
+          { val: 0.8125, str: '13/16' },
+          { val: 0.875, str: '7/8' },
+          { val: 0.9375, str: '15/16' },
+        ];
+
+        const whole = Math.floor(decimal);
+        const remainder = decimal - whole;
+
+        if (remainder < 0.03) return `${whole}"`;
+
+        const closest = fractions.reduce((prev, curr) =>
+          Math.abs(curr.val - remainder) < Math.abs(prev.val - remainder) ? curr : prev
+        );
+
+        return whole > 0 ? `${whole}-${closest.str}"` : `${closest.str}"`;
+      };
+
+      const handleDimensionChange = (field, value) => {
+        setDimensions(prev => ({ ...prev, [field]: parseFloat(value) || 0 }));
+      };
+
+      const handleFabricColorChange = (fabricColor) => {
+        setOrderInfo(prev => ({ ...prev, fabricColor }));
+        if (fabricColor.startsWith('502 ')) {
+          setOptions(prev => ({ ...prev, fabricType: 'vinyl_70' }));
+        } else if (fabricColor.startsWith('Strataglass')) {
+          setOptions(prev => ({ ...prev, fabricType: 'vinyl_61' }));
+        } else {
+          setOptions(prev => ({ ...prev, fabricType: 'solar_standard' }));
+        }
+      };
+
+      const handleOptionChange = (field, value) => {
+        setOptions(prev => {
+          const newOptions = { ...prev, [field]: value };
+          if (field === 'uChannelLeft' || field === 'uChannelRight') {
+            if (value === true || newOptions.uChannelLeft || newOptions.uChannelRight) {
+              newOptions.applyUChannelDeductions = true;
+            }
+          }
+          return newOptions;
+        });
+      };
+
+      const handlePrint = () => {
+        window.print();
+      };
+
+      return (
+        <div className="min-h-screen bg-gray-100 p-4">
+          <div className="max-w-6xl mx-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h1 className="text-2xl font-bold text-gray-800 no-print">Keder Factory Cut Sheet Calculator</h1>
+              <button 
+                onClick={handlePrint}
+                className="no-print bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+              >
+                🖨️ Print Cut Sheet
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Input Panel */}
+              <div className="space-y-4 no-print">
+                {/* Order Info */}
+                <div className="bg-white rounded-lg shadow p-4">
+                  <h2 className="text-lg font-semibold text-gray-700 mb-3">Order Info</h2>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-1">Order #</label>
+                      <input
+                        type="text"
+                        value={orderInfo.orderNumber}
+                        onChange={(e) => setOrderInfo(prev => ({ ...prev, orderNumber: e.target.value }))}
+                        className="w-full border rounded px-2 py-1 text-sm"
+                        placeholder="VT26010057"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-1">Unit #</label>
+                      <input
+                        type="text"
+                        value={orderInfo.unitNumber}
+                        onChange={(e) => setOrderInfo(prev => ({ ...prev, unitNumber: e.target.value }))}
+                        className="w-full border rounded px-2 py-1 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-1">Fabric/Color</label>
+                      <select
+                        value={orderInfo.fabricColor}
+                        onChange={(e) => handleFabricColorChange(e.target.value)}
+                        className="w-full border rounded px-2 py-1 text-sm"
+                      >
+                        <option value="">-- Select Fabric --</option>
+                        <optgroup label="Omega Pro 3%">
+                          <option value="Omega Pro 3% Brown/Taupe">Omega Pro 3% Brown/Taupe</option>
+                          <option value="Omega Pro 3% White">Omega Pro 3% White</option>
+                          <option value="Omega Pro 3% White/Linen">Omega Pro 3% White/Linen</option>
+                          <option value="Omega Pro 3% White Gray">Omega Pro 3% White Gray</option>
+                          <option value="Omega Pro 3% Light Gray">Omega Pro 3% Light Gray</option>
+                          <option value="Omega Pro 3% Black/Bronze">Omega Pro 3% Black/Bronze</option>
+                          <option value="Omega Pro 3% Gray/Black">Omega Pro 3% Gray/Black</option>
+                          <option value="Omega Pro 3% Black">Omega Pro 3% Black</option>
+                          <option value="Omega Pro 3% Charcoal/Taupe">Omega Pro 3% Charcoal/Taupe</option>
+                        </optgroup>
+                        <optgroup label="Omega Pro 5%">
+                          <option value="Omega Pro 5% Brown/Taupe">Omega Pro 5% Brown/Taupe</option>
+                          <option value="Omega Pro 5% White">Omega Pro 5% White</option>
+                          <option value="Omega Pro 5% White/Linen">Omega Pro 5% White/Linen</option>
+                          <option value="Omega Pro 5% White Gray">Omega Pro 5% White Gray</option>
+                          <option value="Omega Pro 5% Light Gray">Omega Pro 5% Light Gray</option>
+                          <option value="Omega Pro 5% Black/Bronze">Omega Pro 5% Black/Bronze</option>
+                          <option value="Omega Pro 5% Gray/Black">Omega Pro 5% Gray/Black</option>
+                          <option value="Omega Pro 5% Black">Omega Pro 5% Black</option>
+                          <option value="Omega Pro 5% Charcoal/Taupe">Omega Pro 5% Charcoal/Taupe</option>
+                        </optgroup>
+                        <optgroup label="Omega Pro 10%">
+                          <option value="Omega Pro 10% Brown/Taupe">Omega Pro 10% Brown/Taupe</option>
+                          <option value="Omega Pro 10% White">Omega Pro 10% White</option>
+                          <option value="Omega Pro 10% White/Linen">Omega Pro 10% White/Linen</option>
+                          <option value="Omega Pro 10% White Gray">Omega Pro 10% White Gray</option>
+                          <option value="Omega Pro 10% Light Gray">Omega Pro 10% Light Gray</option>
+                          <option value="Omega Pro 10% Black/Bronze">Omega Pro 10% Black/Bronze</option>
+                          <option value="Omega Pro 10% Gray/Black">Omega Pro 10% Gray/Black</option>
+                          <option value="Omega Pro 10% Black">Omega Pro 10% Black</option>
+                          <option value="Omega Pro 10% Charcoal/Taupe">Omega Pro 10% Charcoal/Taupe</option>
+                        </optgroup>
+                        <optgroup label="Twitchell">
+                          <option value="Twitchell 80 Black">Twitchell 80 Black</option>
+                          <option value="Twitchell 90 Black">Twitchell 90 Black</option>
+                          <option value="Twitchell 95 Black">Twitchell 95 Black</option>
+                          <option value="Twitchell Nano 95 Black">Twitchell Nano 95 Black</option>
+                          <option value="Twitchell Nano 97 Black">Twitchell Nano 97 Black</option>
+                          <option value="Twitchell Nano 99 Black">Twitchell Nano 99 Black</option>
+                          <option value="Twitchell Blackout">Twitchell Blackout</option>
+                          <option value="Twitchell Insect">Twitchell Insect</option>
+                        </optgroup>
+                        <optgroup label="502 Vinyl">
+                          <option value="502 Black">502 Black</option>
+                          <option value="502 Red">502 Red</option>
+                          <option value="502 White">502 White</option>
+                          <option value="502 Blue">502 Blue</option>
+                          <option value="502 Anthracite">502 Anthracite</option>
+                          <option value="502 Grey">502 Grey</option>
+                          <option value="502 Boulder">502 Boulder</option>
+                          <option value="502 Antelope">502 Antelope</option>
+                          <option value="502 Tan">502 Tan</option>
+                          <option value="502 Hemp">502 Hemp</option>
+                        </optgroup>
+                        <optgroup label="Window">
+                          <option value="Strataglass Clear">Strataglass Clear</option>
+                        </optgroup>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Dimensions */}
+                <div className="bg-white rounded-lg shadow p-4">
+                  <h2 className="text-lg font-semibold text-gray-700 mb-3">Opening Dimensions (inches)</h2>
+                  
+                  <div className="mb-4">
+                    <h3 className="text-sm font-medium text-gray-600 mb-2">Width Measurements</h3>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Top</label>
+                        <input type="number" value={dimensions.topWidth} onChange={(e) => handleDimensionChange('topWidth', e.target.value)} className="w-full border rounded px-2 py-1 text-sm" step="0.0625" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Middle</label>
+                        <input type="number" value={dimensions.midWidth} onChange={(e) => handleDimensionChange('midWidth', e.target.value)} className="w-full border rounded px-2 py-1 text-sm" step="0.0625" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Bottom</label>
+                        <input type="number" value={dimensions.bottomWidth} onChange={(e) => handleDimensionChange('bottomWidth', e.target.value)} className="w-full border rounded px-2 py-1 text-sm" step="0.0625" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-600 mb-2">Height Measurements</h3>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Left</label>
+                        <input type="number" value={dimensions.leftHeight} onChange={(e) => handleDimensionChange('leftHeight', e.target.value)} className="w-full border rounded px-2 py-1 text-sm" step="0.0625" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Center</label>
+                        <input type="number" value={dimensions.centerHeight} onChange={(e) => handleDimensionChange('centerHeight', e.target.value)} className="w-full border rounded px-2 py-1 text-sm" step="0.0625" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Right</label>
+                        <input type="number" value={dimensions.rightHeight} onChange={(e) => handleDimensionChange('rightHeight', e.target.value)} className="w-full border rounded px-2 py-1 text-sm" step="0.0625" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Installation Options */}
+                <div className="bg-white rounded-lg shadow p-4">
+                  <h2 className="text-lg font-semibold text-gray-700 mb-3">Installation Options</h2>
+                  
+                  <div className="grid grid-cols-3 gap-4 mb-4">
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-1">Installation Type</label>
+                      <select value={options.installationType} onChange={(e) => handleOptionChange('installationType', e.target.value)} className="w-full border rounded px-2 py-1 text-sm">
+                        <option value="face_mount">Face Mount</option>
+                        <option value="inside_mount">Inside Mount</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-1">Frame Color</label>
+                      <select value={options.frameColor} onChange={(e) => handleOptionChange('frameColor', e.target.value)} className="w-full border rounded px-2 py-1 text-sm">
+                        <option value="black">Black</option>
+                        <option value="white">White</option>
+                        <option value="bronze">Bronze</option>
+                        <option value="tan">Tan</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-1">Fabric Type</label>
+                      <select value={options.fabricType} onChange={(e) => handleOptionChange('fabricType', e.target.value)} className="w-full border rounded px-2 py-1 text-sm">
+                        {Object.entries(fabricRollWidths).map(([key, val]) => (
+                          <option key={key} value={key}>{val.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-1">Left Track Mount</label>
+                      <select value={options.trackMountLeft} onChange={(e) => handleOptionChange('trackMountLeft', e.target.value)} className="w-full border rounded px-2 py-1 text-sm">
+                        <option value="wall_mount">Wall Mount (+3")</option>
+                        <option value="inside_mount">Inside Mount</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-1">Right Track Mount</label>
+                      <select value={options.trackMountRight} onChange={(e) => handleOptionChange('trackMountRight', e.target.value)} className="w-full border rounded px-2 py-1 text-sm">
+                        <option value="wall_mount">Wall Mount (+3")</option>
+                        <option value="inside_mount">Inside Mount</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4 mb-4">
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-1">Motor Type</label>
+                      <select value={options.motorType} onChange={(e) => handleOptionChange('motorType', e.target.value)} className="w-full border rounded px-2 py-1 text-sm">
+                        <option value="alpha">Alpha Motor</option>
+                        <option value="somfy">Somfy Motor</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-1">Motor Side</label>
+                      <select value={options.motorSide} onChange={(e) => handleOptionChange('motorSide', e.target.value)} className="w-full border rounded px-2 py-1 text-sm">
+                        <option value="left">Left</option>
+                        <option value="right">Right</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-1">Brush Size</label>
+                      <select value={options.brushSize} onChange={(e) => handleOptionChange('brushSize', e.target.value)} className="w-full border rounded px-2 py-1 text-sm">
+                        <option value="1">1" Brush (Standard)</option>
+                        <option value="2">2" Brush</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="border-t pt-3 mt-3">
+                    <h3 className="text-sm font-medium text-gray-600 mb-2">U-Channel</h3>
+                    <div className="flex flex-wrap gap-4">
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={options.uChannelLeft} onChange={(e) => handleOptionChange('uChannelLeft', e.target.checked)} className="rounded" />
+                        <span className="text-sm">Left Side</span>
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={options.uChannelRight} onChange={(e) => handleOptionChange('uChannelRight', e.target.checked)} className="rounded" />
+                        <span className="text-sm">Right Side</span>
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={options.applyUChannelDeductions} onChange={(e) => handleOptionChange('applyUChannelDeductions', e.target.checked)} className="rounded" disabled={!options.uChannelLeft && !options.uChannelRight} />
+                        <span className="text-sm">Apply Deductions (-0.375"/side)</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="border-t pt-3 mt-3">
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={options.applyBoxDeduction} onChange={(e) => handleOptionChange('applyBoxDeduction', e.target.checked)} className="rounded" />
+                      <span className="text-sm">Apply 1/4" box deduction (recommended)</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Output Panel */}
+              <div className="space-y-4">
+                {/* Print Header - only shows on print */}
+                <div className="print-only" style={{marginBottom: '8px'}}>
+                  <h1 style={{fontSize: '18pt', fontWeight: 'bold', margin: 0}}>Keder Factory Cut Sheet</h1>
+                  {orderInfo.orderNumber && <div style={{fontSize: '11pt'}}>Order: {orderInfo.orderNumber}</div>}
+                </div>
+
+                {/* System Summary */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <h2 className="text-lg font-semibold text-blue-800 mb-3">System Summary</h2>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="text-gray-600">Opening Width:</div>
+                    <div className="font-medium">{calculations.selectedWidth}"</div>
+                    <div className="text-gray-600">Track Adjustment:</div>
+                    <div className="font-medium">+{calculations.trackAdjustment}"</div>
+                    <div className="text-gray-600 font-semibold">W_base (System Width):</div>
+                    <div className="font-bold text-blue-700">{calculations.W_base}"</div>
+                    <div className="text-gray-600">Box Deduction:</div>
+                    <div className="font-medium">-{calculations.boxDeduction}"</div>
+                    <div className="text-gray-600">Box Width (Housing):</div>
+                    <div className="font-medium">{calculations.boxWidth}"</div>
+                    <div className="text-gray-600">U-Channel Deduction:</div>
+                    <div className="font-medium">-{calculations.u_channel_ded}"</div>
+                    <div className="text-gray-600 font-semibold">H_system:</div>
+                    <div className="font-bold text-blue-700">{calculations.H_system}"</div>
+                    <div className="text-gray-600 font-semibold">Frame Color:</div>
+                    <div className="font-bold text-blue-700 uppercase">{options.frameColor}</div>
+                    <div className="text-gray-600 font-semibold">Motor:</div>
+                    <div className="font-bold text-blue-700">{options.motorType === 'alpha' ? 'Alpha' : 'Somfy'} - {options.motorSide.toUpperCase()}</div>
+                  </div>
+                </div>
+
+                {/* Cut Sheet */}
+                <div className="bg-white rounded-lg shadow p-4">
+                  <div className="flex justify-between items-center mb-3">
+                    <h2 className="text-lg font-semibold text-gray-700">CUT SHEET</h2>
+                    {orderInfo.orderNumber && (
+                      <span className="text-sm text-gray-500">Order: {orderInfo.orderNumber}</span>
+                    )}
+                  </div>
+                  
+                  <div className="text-sm text-gray-600 mb-3">
+                    {orderInfo.unitNumber && <span>Unit #{orderInfo.unitNumber}: </span>}
+                    <span className="font-medium">{calculations.W_base}" × {calculations.H_system}"</span>
+                  </div>
+                  
+                  {/* Order Selections Summary */}
+                  <div className="mb-4 p-3 bg-gray-50 rounded border text-sm">
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+                      <div><span className="text-gray-500">Frame Color:</span> <strong className="uppercase">{options.frameColor}</strong></div>
+                      <div><span className="text-gray-500">Motor:</span> <strong>{options.motorType === 'alpha' ? 'Alpha' : 'Somfy'} - {options.motorSide.toUpperCase()}</strong></div>
+                      <div><span className="text-gray-500">Left Track:</span> <strong>{options.trackMountLeft === 'wall_mount' ? 'Wall Mount' : 'Inside Mount'}</strong></div>
+                      <div><span className="text-gray-500">Right Track:</span> <strong>{options.trackMountRight === 'wall_mount' ? 'Wall Mount' : 'Inside Mount'}</strong></div>
+                      <div><span className="text-gray-500">U-Channel:</span> <strong>{options.uChannelLeft && options.uChannelRight ? 'Both Sides' : options.uChannelLeft ? 'Left Only' : options.uChannelRight ? 'Right Only' : 'None'}</strong></div>
+                      <div><span className="text-gray-500">Brush:</span> <strong>{options.brushSize}" Brush</strong></div>
+                    </div>
+                    {orderInfo.fabricColor && (
+                      <div className="mt-2 pt-2 border-t">
+                        <span className="text-gray-500">Fabric:</span> <strong>{orderInfo.fabricColor}</strong>
+                        <span className="ml-2 text-gray-400">({calculations.fabricInfo.name})</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b-2 border-gray-300">
+                        <th className="text-left py-2">Component</th>
+                        <th className="text-right py-2">Cut Length</th>
+                        <th className="text-right py-2">Qty</th>
+                        <th className="text-left py-2 pl-4">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-b">
+                        <td className="py-1">Roller Tube (3.75")</td>
+                        <td className="text-right font-mono">{formatFraction(calculations.cuts.rollerTube)}</td>
+                        <td className="text-right">1</td>
+                        <td className="pl-4 text-gray-500 text-xs">W_base - 14.5"</td>
+                      </tr>
+                      <tr className="border-b">
+                        <td className="py-1">Weight Bar</td>
+                        <td className="text-right font-mono">{formatFraction(calculations.cuts.weightBar)}</td>
+                        <td className="text-right">1</td>
+                        <td className="pl-4 text-gray-500 text-xs">W_base - 6.625" - U</td>
+                      </tr>
+                      <tr className="border-b">
+                        <td className="py-1">Housing Main</td>
+                        <td className="text-right font-mono">{formatFraction(calculations.cuts.housingMain)}</td>
+                        <td className="text-right">1</td>
+                        <td className="pl-4 text-gray-500 text-xs">BoxW - 0.5"</td>
+                      </tr>
+                      <tr className="border-b">
+                        <td className="py-1">Housing Cover</td>
+                        <td className="text-right font-mono">{formatFraction(calculations.cuts.housingCover)}</td>
+                        <td className="text-right">1</td>
+                        <td className="pl-4 text-gray-500 text-xs">BoxW - 0.5625"</td>
+                      </tr>
+                      <tr className="border-b">
+                        <td className="py-1">V-Track Left</td>
+                        <td className="text-right font-mono">{formatFraction(calculations.cuts.vTrackLeft)}</td>
+                        <td className="text-right">1</td>
+                        <td className="pl-4 text-gray-500 text-xs">H_system</td>
+                      </tr>
+                      <tr className="border-b">
+                        <td className="py-1">V-Track Right</td>
+                        <td className="text-right font-mono">{formatFraction(calculations.cuts.vTrackRight)}</td>
+                        <td className="text-right">1</td>
+                        <td className="pl-4 text-gray-500 text-xs">H_system</td>
+                      </tr>
+                      {calculations.cuts.uChannelLeft && (
+                        <tr className="border-b bg-yellow-50">
+                          <td className="py-1">U-Channel Left</td>
+                          <td className="text-right font-mono">{formatFraction(calculations.cuts.uChannelLeft)}</td>
+                          <td className="text-right">1</td>
+                          <td className="pl-4 text-gray-500 text-xs">H_system</td>
+                        </tr>
+                      )}
+                      {calculations.cuts.uChannelRight && (
+                        <tr className="border-b bg-yellow-50">
+                          <td className="py-1">U-Channel Right</td>
+                          <td className="text-right font-mono">{formatFraction(calculations.cuts.uChannelRight)}</td>
+                          <td className="text-right">1</td>
+                          <td className="pl-4 text-gray-500 text-xs">H_system</td>
+                        </tr>
+                      )}
+                      <tr className="border-b">
+                        <td className="py-1">Pile Brush ({options.brushSize}")</td>
+                        <td className="text-right font-mono">{formatFraction(calculations.cuts.pileBrush)}</td>
+                        <td className="text-right">1</td>
+                        <td className="pl-4 text-gray-500 text-xs">W_base - 6.625"</td>
+                      </tr>
+                      <tr className="border-b border-t-2 border-gray-300">
+                        <td className="py-1 font-medium">Fabric Width</td>
+                        <td className="text-right font-mono font-medium">{formatFraction(calculations.cuts.fabricWidth)}</td>
+                        <td className="text-right">1</td>
+                        <td className="pl-4 text-gray-500 text-xs">W_base - 3.5" - U</td>
+                      </tr>
+                      <tr className="border-b">
+                        <td className="py-1 font-medium">Fabric Height</td>
+                        <td className="text-right font-mono font-medium">{formatFraction(calculations.cuts.fabricHeight)}</td>
+                        <td className="text-right">1</td>
+                        <td className="pl-4 text-gray-500 text-xs">H + 10"</td>
+                      </tr>
+                    </tbody>
+                  </table>
+
+                  {calculations.seamRequired && (
+                    <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded">
+                      <div className="text-orange-800 font-semibold text-sm">⚠️ SEAM REQUIRED</div>
+                      <div className="text-sm text-orange-700 mt-1">
+                        Material height ({calculations.cuts.fabricHeight}") exceeds max panel ({calculations.fabricInfo.maxPanel}")
+                      </div>
+                      <div className="text-sm mt-2">
+                        <div>Panel 1: {formatFraction(calculations.panel1Height)}</div>
+                        <div>Panel 2: {formatFraction(calculations.panel2Height)}</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Spring Holes */}
+                <div className="bg-white rounded-lg shadow p-4">
+                  <h2 className="text-lg font-semibold text-gray-700 mb-3">
+                    SPRING HOLES - {calculations.H_system}" Height
+                  </h2>
+                  
+                  {calculations.springData.error ? (
+                    <div className="text-red-600">{calculations.springData.error}</div>
+                  ) : (
+                    <>
+                      <div className="flex gap-6 mb-3 text-sm">
+                        <div>
+                          <span className="text-gray-500">Total Holes:</span>{' '}
+                          <span className="font-semibold">{calculations.springData.holes}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Spacing:</span>{' '}
+                          <span className="font-semibold">{calculations.springData.spacing}"</span>
+                        </div>
+                      </div>
+                      
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b">
+                            <th className="text-left py-1">Hole #</th>
+                            <th className="text-right py-1">From Top</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {calculations.springData.positions.map((pos, idx) => (
+                            <tr key={idx} className="border-b">
+                              <td className="py-1">{idx + 1}</td>
+                              <td className="text-right font-mono">{formatFraction(pos)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      
+                      <div className="mt-2 text-xs text-gray-500">
+                        Top offset: 8" | Bottom offset: 12" | Min spacing: 16" | Max spacing: 20"
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Parts Count */}
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <h2 className="text-lg font-semibold text-gray-700 mb-3">Parts per Spring Holes ({calculations.springData.holes})</h2>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div>Leaf Springs:</div>
+                    <div className="font-medium">{calculations.springData.holes * 2}</div>
+                    <div>Spring Stopper Blocks:</div>
+                    <div className="font-medium">{calculations.springData.holes * 2}</div>
+                    <div>Teflon Sleeves:</div>
+                    <div className="font-medium">{calculations.springData.holes * 4}</div>
+                    <div>Spring Rivets:</div>
+                    <div className="font-medium">{calculations.springData.holes * 4}</div>
+                    <div>Spring Screws:</div>
+                    <div className="font-medium">{calculations.springData.holes * 2}</div>
+                    <div>Track Sleeves:</div>
+                    <div className="font-medium">{calculations.springData.holes * 2}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<CutSheetCalculator />);
+  </script>
+</body>
+</html>
